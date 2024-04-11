@@ -11,6 +11,7 @@ Introduction
 
 Implementation of the ALT_BN128 precompiled contracts.
 """
+
 from ethereum.base_types import U256, Uint
 from ethereum.crypto.alt_bn128 import (
     ALT_BN128_CURVE_ORDER,
@@ -62,7 +63,7 @@ def alt_bn128_add(evm: Evm) -> None:
         p0 = BNP(BNF(x0_value), BNF(y0_value))
         p1 = BNP(BNF(x1_value), BNF(y1_value))
     except ValueError:
-        raise OutOfGasError
+        raise OutOfGasError from ValueError
 
     p = p0 + p1
 
@@ -97,7 +98,7 @@ def alt_bn128_mul(evm: Evm) -> None:
     try:
         p0 = BNP(BNF(x0_value), BNF(y0_value))
     except ValueError:
-        raise OutOfGasError
+        raise OutOfGasError from ValueError
 
     p = p0.mul_by(n)
 
@@ -138,7 +139,7 @@ def alt_bn128_pairing_check(evm: Evm) -> None:
                 BNF2((values[3], values[2])), BNF2((values[5], values[4]))
             )
         except ValueError:
-            raise OutOfGasError()
+            raise OutOfGasError() from ValueError
         ensure(
             p.mul_by(ALT_BN128_CURVE_ORDER) == BNP.point_at_infinity(),
             OutOfGasError,
