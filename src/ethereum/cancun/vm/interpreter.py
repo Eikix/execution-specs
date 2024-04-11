@@ -11,6 +11,7 @@ Introduction
 
 A straightforward interpreter that executes EVM code.
 """
+
 from dataclasses import dataclass
 from typing import Iterable, Optional, Set, Tuple, Union
 
@@ -289,7 +290,7 @@ def execute_code(message: Message, env: Environment) -> Evm:
             try:
                 op = Ops(evm.code[evm.pc])
             except ValueError:
-                raise InvalidOpcode(evm.code[evm.pc])
+                raise InvalidOpcode(evm.code[evm.pc]) from ValueError
 
             evm_trace(evm, OpStart(op))
             op_implementation[op](evm)

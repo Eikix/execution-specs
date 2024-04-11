@@ -11,6 +11,7 @@ Introduction
 
 EVM gas constants and calculators.
 """
+
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -148,7 +149,7 @@ def calculate_memory_gas_cost(size_in_bytes: Uint) -> Uint:
     try:
         return total_gas_cost
     except ValueError:
-        raise OutOfGasError
+        raise OutOfGasError from ValueError
 
 
 def calculate_gas_extend_memory(
