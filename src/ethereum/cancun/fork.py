@@ -40,12 +40,12 @@ from .state import (
     state_root,
 )
 from .transactions import (
+    STANDARD_TOKEN_COST,
+    TOTAL_COST_FLOOR_PER_TOKEN,
     TX_ACCESS_LIST_ADDRESS_COST,
     TX_ACCESS_LIST_STORAGE_KEY_COST,
     TX_BASE_COST,
     TX_CREATE_COST,
-    TX_DATA_COST_PER_NON_ZERO,
-    TX_DATA_COST_PER_ZERO,
     AccessListTransaction,
     BlobTransaction,
     FeeMarketTransaction,
@@ -692,7 +692,8 @@ def process_transaction(
 
     effective_gas_fee = tx.gas * env.gas_price
 
-    gas = tx.gas - calculate_intrinsic_cost(tx)
+    intrinsic_cost = calculate_intrinsic_cost(tx)
+    gas = tx.gas - intrinsic_cost
     increment_nonce(env.state, sender)
 
     sender_balance_after_gas_fee = (
@@ -724,17 +725,24 @@ def process_transaction(
 
     output = process_message_call(message, env)
 
-    gas_used = tx.gas - output.gas_left
-    gas_refund = min(gas_used // 5, output.refund_counter)
-    gas_refund_amount = (output.gas_left + gas_refund) * env.gas_price
+    gas_used_before_refund = tx.gas - output.gas_left
+    gas_refund = min(gas_used_before_refund // 5, output.refund_counter)
+
+    # EIP 7623: <https://eips.ethereum.org/EIPS/eip-7623>
+    # We have to substract the intrinsic cost from the gas used since the
+    # gas passed to the message was equal to `tx.gas - intrinsic_cost`
+    evm_gas_used = gas_used_before_refund - gas_refund - intrinsic_cost
+    total_gas_used = max(
+        evm_gas_used + calculate_intrinsic_cost(tx, STANDARD_TOKEN_COST),
+        TX_BASE_COST
+        + calculate_calldata_cost(tx, TOTAL_COST_FLOOR_PER_TOKEN)
+        + calculate_access_list_cost(tx),
+    )
+    gas_refund_amount = (tx.gas - total_gas_used) * env.gas_price
 
     # For non-1559 transactions env.gas_price == tx.gas_price
     priority_fee_per_gas = env.gas_price - env.base_fee_per_gas
-    transaction_fee = (
-        tx.gas - output.gas_left - gas_refund
-    ) * priority_fee_per_gas
-
-    total_gas_used = gas_used - gas_refund
+    transaction_fee = total_gas_used * priority_fee_per_gas
 
     # refund gas
     sender_balance_after_refund = (
@@ -796,7 +804,9 @@ def validate_transaction(tx: Transaction) -> bool:
     return True
 
 
-def calculate_intrinsic_cost(tx: Transaction) -> Uint:
+def calculate_intrinsic_cost(
+    tx: Transaction, calldata_token_cost: int = TOTAL_COST_FLOOR_PER_TOKEN
+) -> Uint:
     """
     Calculates the gas that is charged before execution is started.
 
@@ -819,19 +829,29 @@ def calculate_intrinsic_cost(tx: Transaction) -> Uint:
     verified : `ethereum.base_types.Uint`
         The intrinsic cost of the transaction.
     """
-    data_cost = 0
+    data_cost = calculate_calldata_cost(tx, calldata_token_cost)
 
-    for byte in tx.data:
-        if byte == 0:
-            data_cost += TX_DATA_COST_PER_ZERO
-        else:
-            data_cost += TX_DATA_COST_PER_NON_ZERO
+    create_cost = calculate_create_cost(tx)
 
-    if tx.to == Bytes0(b""):
-        create_cost = TX_CREATE_COST + int(init_code_cost(Uint(len(tx.data))))
-    else:
-        create_cost = 0
+    access_list_cost = 0
 
+    return Uint(TX_BASE_COST + data_cost + create_cost + access_list_cost)
+
+
+def calculate_access_list_cost(tx: Transaction) -> Uint:
+    """
+    Calculates the cost of the access list in a transaction.
+
+    Parameters
+    ----------
+    tx :
+        Transaction to compute the access list cost of.
+
+    Returns
+    -------
+    access_list_cost : `ethereum.base_types.Uint`
+        The cost of the access list in the transaction.
+    """
     access_list_cost = 0
     if isinstance(
         tx, (AccessListTransaction, FeeMarketTransaction, BlobTransaction)
@@ -839,8 +859,50 @@ def calculate_intrinsic_cost(tx: Transaction) -> Uint:
         for _address, keys in tx.access_list:
             access_list_cost += TX_ACCESS_LIST_ADDRESS_COST
             access_list_cost += len(keys) * TX_ACCESS_LIST_STORAGE_KEY_COST
+    return Uint(access_list_cost)
 
-    return Uint(TX_BASE_COST + data_cost + create_cost + access_list_cost)
+
+def calculate_create_cost(tx: Transaction) -> Uint:
+    """
+    Calculates the cost of creating a contract.
+    Parameters
+    ----------
+    tx :
+        Transaction to compute the create cost of.
+    Returns
+    -------
+    create_cost : `ethereum.base_types.Uint`
+        The cost of creating the contract.
+    """
+    if tx.to == Bytes0(b""):
+        create_cost = TX_CREATE_COST + int(init_code_cost(Uint(len(tx.data))))
+    else:
+        create_cost = 0
+    return Uint(create_cost)
+
+
+def calculate_calldata_cost(tx: Transaction, cost_per_token: int) -> Uint:
+    """
+    Calculates the cost of the calldata in a transaction.
+
+    Parameters
+    ----------
+    tx :
+        Transaction to compute the calldata cost of.
+
+    Returns
+    -------
+    calldata_cost : `ethereum.base_types.Uint`
+        The cost of the calldata in the transaction.
+    """
+    calldata_tokens = 0
+    for byte in tx.data:
+        if byte == 0:
+            calldata_tokens += 1
+        else:
+            calldata_tokens += 4
+
+    return Uint(calldata_tokens * cost_per_token)
 
 
 def recover_sender(chain_id: U64, tx: Transaction) -> Address:

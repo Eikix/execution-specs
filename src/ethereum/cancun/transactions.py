@@ -3,6 +3,7 @@ Transactions are atomic units of work created externally to Ethereum and
 submitted to be executed. If Ethereum is viewed as a state machine,
 transactions are the events that move between states.
 """
+
 from dataclasses import dataclass
 from typing import Tuple, Union
 
@@ -20,8 +21,8 @@ from ..exceptions import InvalidBlock
 from .fork_types import Address, VersionedHash
 
 TX_BASE_COST = 21000
-TX_DATA_COST_PER_NON_ZERO = 16
-TX_DATA_COST_PER_ZERO = 4
+STANDARD_TOKEN_COST = 4
+TOTAL_COST_FLOOR_PER_TOKEN = 12
 TX_CREATE_COST = 32000
 TX_ACCESS_LIST_ADDRESS_COST = 2400
 TX_ACCESS_LIST_STORAGE_KEY_COST = 1900
